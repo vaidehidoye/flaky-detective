@@ -18,8 +18,9 @@ RUNS = 100  # how many times to run each test
 # ---------------------------------------------------------------------------
 # Suspects
 #
-# Each suspect has a "freeze" function. It runs right before every test run
-# and locks that one source of moodiness in place.
+# Each suspect has two functions:
+#   freeze   runs right before a test run and locks that suspect in place
+#   unfreeze runs right after, and puts everything back to normal
 # ---------------------------------------------------------------------------
 
 def freeze_randomness():
@@ -30,8 +31,33 @@ def freeze_randomness():
     random.seed(42)
 
 
+def unfreeze_randomness():
+    # Calling seed() with no number picks a fresh, unpredictable seed.
+    random.seed()
+
+
+# We can't stop real time, but we can trick the test. In Python a function
+# is just a value, like a number, so we can swap time.time for our own fake
+# function that always reports the same moment.
+REAL_TIME = time.time
+FROZEN_MOMENT = 1_700_000_000.5  # a fixed moment, halfway through a second
+
+
+def fake_time():
+    return FROZEN_MOMENT
+
+
+def freeze_clock():
+    time.time = fake_time
+
+
+def unfreeze_clock():
+    time.time = REAL_TIME  # put the real clock back
+
+
 SUSPECTS = {
-    "🎲 randomness": freeze_randomness,
+    "🎲 randomness": (freeze_randomness, unfreeze_randomness),
+    "⏰ clock": (freeze_clock, unfreeze_clock),
 }
 
 
@@ -48,26 +74,32 @@ def find_tests(module):
     return tests
 
 
-def run_once(test, freeze=None):
+def run_once(test, suspect=None):
     """Run a test one time. Return True if it passed, False if it failed.
 
-    If a freeze function is given, call it first to lock down a suspect.
+    If a suspect is given, freeze it before the test and unfreeze it after.
     """
-    if freeze is not None:
+    if suspect is not None:
+        freeze, unfreeze = suspect
         freeze()
     try:
         test()
         return True
     except AssertionError:
         return False
+    finally:
+        # "finally" runs no matter what, pass or fail, so the suspect
+        # is always unfrozen and can't leak into the next run.
+        if suspect is not None:
+            unfreeze()
 
 
-def investigate(test, freeze=None):
+def investigate(test, suspect=None):
     """Run a test RUNS times and count the results."""
     passes = 0
     fails = 0
     for _ in range(RUNS):
-        if run_once(test, freeze):
+        if run_once(test, suspect):
             passes += 1
         else:
             fails += 1
@@ -82,8 +114,8 @@ def is_flaky(passes, fails):
 
 def find_culprit(test):
     """Try freezing each suspect. Return the first one that cures the moodiness."""
-    for suspect_name, freeze in SUSPECTS.items():
-        passes, fails = investigate(test, freeze)
+    for suspect_name, suspect in SUSPECTS.items():
+        passes, fails = investigate(test, suspect)
         print(f"    with {suspect_name} frozen: passed {passes:3}  failed {fails:3}")
         if not is_flaky(passes, fails):
             return suspect_name

@@ -42,7 +42,7 @@ test_moody_random     passed  92  failed   8   🎭 FLAKY (sometimes passes, som
 - [x] Moody example tests
 - [x] Detect *that* a test is flaky
 - [x] Find out *why*: freeze randomness
-- [ ] Freeze the clock
+- [x] Freeze the clock
 - [ ] Shuffle test order
 - [ ] Catch speed races
 - [ ] Friendly report
