@@ -12,18 +12,33 @@
 #
 # At the end it prints a short "case file" with each culprit and how to fix it.
 #
+# Before all that, if the trained model is available (see ml/), it reads each
+# test's code and predicts how likely it is to be flaky. Tests are then
+# investigated riskiest first, and --top N investigates only the N riskiest.
+# Running a test hundreds of times is slow; reading its code is instant.
+#
 # Run it with:   python3 detective.py
-# Or point it at your own tests file:   python3 detective.py my_tests.py
+# Your own file:  python3 detective.py my_tests.py
+# Riskiest 10:    python3 detective.py my_tests.py --top 10
+# Only predict:   python3 detective.py my_tests.py --predict-only
 
+import argparse
 import importlib
 import random
 import sys
 import threading
 import time
 
-# Which tests file to investigate. The first word after "detective.py" on the
-# command line (sys.argv[1]) if there is one, otherwise our example file.
-TESTS_FILE = sys.argv[1] if len(sys.argv) > 1 else "moody_tests.py"
+from ml.predict import load_model, risk_scores
+
+# Read the options typed after "detective.py" on the command line.
+parser = argparse.ArgumentParser(description="Find out why tests are flaky.")
+parser.add_argument("file", nargs="?", default="moody_tests.py", help="tests file to investigate")
+parser.add_argument("--top", type=int, help="only investigate the N riskiest tests")
+parser.add_argument("--predict-only", action="store_true", help="only show the model's predictions")
+OPTIONS = parser.parse_args()
+
+TESTS_FILE = OPTIONS.file
 tests = importlib.import_module(TESTS_FILE.removesuffix(".py"))
 
 RUNS = 100        # Phase 1: how many times to run each test on its own
@@ -262,17 +277,42 @@ def phase_two(names, reliable, findings):
 # The final report
 # ---------------------------------------------------------------------------
 
-def print_case_file(names, findings):
+def print_case_file(names, findings, scores):
     print("=" * 70)
     print(f"📋 CASE FILE for {TESTS_FILE}")
     print("=" * 70)
     if not findings:
-        print(f"All {len(names)} tests are reliable. No flakiness found ✅")
+        print(f"All {len(names)} investigated tests are reliable. No flakiness found ✅")
         return
-    print(f"{len(findings)} of {len(names)} tests are flaky:\n")
+    print(f"{len(findings)} of {len(names)} investigated tests are flaky:\n")
     for test, culprit, advice in findings:
-        print(f"  {test:24} {culprit}")
+        predicted = f"  (model's risk score: {scores[test]:.2f})" if test in scores else ""
+        print(f"  {test:24} {culprit}{predicted}")
         print(f"  {'':24} → fix: {advice}\n")
+
+
+# ---------------------------------------------------------------------------
+# Phase 0: the model's prediction
+# ---------------------------------------------------------------------------
+
+def phase_zero(names):
+    """Ask the model how risky each test looks. Return {name: risk}, or {}
+    if the model isn't available."""
+    model = load_model()
+    if model is None:
+        print("(No model available, so tests are investigated in name order.")
+        print(" To use it: pip install -r requirements.txt)\n")
+        return {}
+
+    scores = risk_scores(model, tests.__file__)
+    print("PHASE 0: the model reads each test's code and scores its risk of being flaky")
+    print("(0 = looks safe, 1 = looks flaky. Only the ranking matters, not the exact number.)\n")
+    for name in sorted(names, key=lambda n: -scores.get(n, 0)):
+        if name in scores:
+            bar = "#" * round(scores[name] * 20)
+            print(f"{name:24}  {scores[name]:.2f}  {bar}")
+    print()
+    return scores
 
 
 # ---------------------------------------------------------------------------
@@ -281,10 +321,22 @@ def print_case_file(names, findings):
 
 def main():
     names = find_test_names()
+    scores = phase_zero(names)
+    if OPTIONS.predict_only:
+        return
+
+    # Riskiest first. With --top N, only the N riskiest are investigated.
+    names.sort(key=lambda n: -scores.get(n, 0))
+    if OPTIONS.top is not None:
+        skipped = names[OPTIONS.top:]
+        names = names[:OPTIONS.top]
+        if skipped:
+            print(f"Skipping the {len(skipped)} lowest-risk tests: {', '.join(skipped)}\n")
+
     findings = []
     reliable = phase_one(names, findings)
     phase_two(names, reliable, findings)
-    print_case_file(names, findings)
+    print_case_file(names, findings, scores)
 
     # Programs end with an "exit code": 0 means "all good", anything else
     # means "something's wrong". Other tools (like GitHub's automatic checks)
