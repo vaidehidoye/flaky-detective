@@ -35,13 +35,13 @@ test_moody_random     passed  92  failed   8   🎭 FLAKY (sometimes passes, som
 | File | What it does |
 |------|--------------|
 | `moody_tests.py` | Example tests, some of them moody on purpose |
-| `detective.py`   | Runs each test many times and counts passes and fails |
+| `detective.py`   | Runs each test many times, then freezes suspects to find the culprit |
 
 ## Roadmap
 
 - [x] Moody example tests
 - [x] Detect *that* a test is flaky
-- [ ] Find out *why*: freeze randomness
+- [x] Find out *why*: freeze randomness
 - [ ] Freeze the clock
 - [ ] Shuffle test order
 - [ ] Catch speed races
