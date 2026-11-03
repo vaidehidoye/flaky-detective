@@ -5,6 +5,7 @@
 # If an `assert` line is false, Python raises an error and the test FAILED.
 
 import random
+import threading
 import time
 
 
@@ -51,3 +52,21 @@ def test_cart_starts_empty():
     # The VICTIM. It expects the cart to be empty. That's true if it runs
     # before test_add_to_cart, and false if it runs after.
     assert len(shopping_cart) == 0, f"cart already has {shopping_cart}"
+
+
+def test_moody_speed():
+    # A moody test that depends on SPEED (a "race").
+    # A helper (a "thread") works at the same time as the test itself.
+    # The test waits 2 milliseconds and then checks whether the helper has
+    # finished. But the helper ALSO takes about 2 milliseconds, so it's a
+    # race: sometimes the helper wins, sometimes the test checks too early.
+    results = []
+
+    def slow_helper():
+        time.sleep(0.002)  # pretend to do some work
+        results.append("done")
+
+    helper = threading.Thread(target=slow_helper)
+    helper.start()
+    time.sleep(0.002)  # BUG: guessing how long to wait. helper.join() would wait properly.
+    assert results == ["done"], "checked before the helper finished"

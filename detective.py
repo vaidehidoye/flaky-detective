@@ -14,6 +14,7 @@
 
 import importlib
 import random
+import threading
 import time
 
 import moody_tests
@@ -66,9 +67,29 @@ def unfreeze_clock():
     time.time = REAL_TIME  # put the real clock back
 
 
+# A "thread" is a helper that works at the same time as the test. Normally
+# thread.start() sends the helper off to work in the background. We swap
+# start() for a version that makes the helper do its whole job right away,
+# before the test continues. Nothing happens at the same time, so no races.
+REAL_THREAD_START = threading.Thread.start
+
+
+def start_and_finish_right_away(thread):
+    thread.run()  # run() is the helper's actual job, done right here and now
+
+
+def freeze_speed():
+    threading.Thread.start = start_and_finish_right_away
+
+
+def unfreeze_speed():
+    threading.Thread.start = REAL_THREAD_START
+
+
 SUSPECTS = {
     "🎲 randomness": (freeze_randomness, unfreeze_randomness),
     "⏰ clock": (freeze_clock, unfreeze_clock),
+    "🏃 speed": (freeze_speed, unfreeze_speed),
 }
 
 

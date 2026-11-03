@@ -45,7 +45,7 @@ test_cart_starts_empty    passed alone, but failed in 25/50 shuffled orders
 ## How it works
 
 1. **Alone:** run each test 100 times. If it both passes and fails, it's flaky.
-   Freeze one suspect at a time (randomness, then the clock). The suspect whose
+   Freeze one suspect at a time (randomness, the clock, then speed). The suspect whose
    freezing makes the moodiness stop is the culprit.
 2. **Together:** run every test in 50 shuffled orders, starting fresh each time.
    A test that was fine alone but fails here is being tripped up by another
@@ -65,5 +65,5 @@ test_cart_starts_empty    passed alone, but failed in 25/50 shuffled orders
 - [x] Find out *why*: freeze randomness
 - [x] Freeze the clock
 - [x] Shuffle test order
-- [ ] Catch speed races
+- [x] Catch speed races
 - [ ] Friendly report
