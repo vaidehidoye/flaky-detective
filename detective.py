@@ -1,18 +1,29 @@
 # detective.py
 #
-# Step 2: run every test many times and count how often it passes and fails.
-#         A test that does both is "flaky".
-# Step 3: for each flaky test, lock down one suspect at a time.
-#         If the test stops being moody, that suspect is the culprit.
+# Phase 1: investigate each test ALONE.
+#   Run it many times and count passes and fails. A test that does both is
+#   "flaky". For each flaky test, lock down one suspect at a time. If the test
+#   stops being moody, that suspect is the culprit.
+#
+# Phase 2: investigate tests TOGETHER.
+#   Some tests only misbehave when another test ran before them and left a
+#   mess. Run the whole set of tests in shuffled orders to catch those, then
+#   test pairs to find out exactly who made the mess.
 #
 # Run it with:   python3 detective.py
 
+import importlib
 import random
 import time
 
 import moody_tests
 
-RUNS = 100  # how many times to run each test
+RUNS = 100        # Phase 1: how many times to run each test on its own
+SHUFFLES = 50     # Phase 2: how many shuffled orders of the whole set to try
+
+# The detective's own private dice for shuffling. Kept separate from the
+# `random` the tests use, so that freezing randomness doesn't freeze our shuffles.
+shuffler = random.Random()
 
 
 # ---------------------------------------------------------------------------
@@ -65,20 +76,25 @@ SUSPECTS = {
 # Running tests
 # ---------------------------------------------------------------------------
 
-def find_tests(module):
-    """Find every function in the module whose name starts with 'test_'."""
-    tests = []
-    for name in dir(module):
-        if name.startswith("test_"):
-            tests.append(getattr(module, name))
-    return tests
+def fresh_start():
+    """Reload the tests file from scratch, so everything shared (like the
+    shopping cart) is brand new and empty. Like tidying the room."""
+    importlib.reload(moody_tests)
 
 
-def run_once(test, suspect=None):
+def find_test_names():
+    """Find every function in the tests file whose name starts with 'test_'."""
+    return [name for name in dir(moody_tests) if name.startswith("test_")]
+
+
+def run_once(name, suspect=None):
     """Run a test one time. Return True if it passed, False if it failed.
 
     If a suspect is given, freeze it before the test and unfreeze it after.
     """
+    # We look the test up by name every time, because fresh_start() replaces
+    # the old test functions with brand-new copies.
+    test = getattr(moody_tests, name)
     if suspect is not None:
         freeze, unfreeze = suspect
         freeze()
@@ -94,12 +110,22 @@ def run_once(test, suspect=None):
             unfreeze()
 
 
-def investigate(test, suspect=None):
-    """Run a test RUNS times and count the results."""
+def is_flaky(passes, fails):
+    """Flaky means it did BOTH: passed at least once and failed at least once."""
+    return passes > 0 and fails > 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: each test alone
+# ---------------------------------------------------------------------------
+
+def investigate_alone(name, suspect=None):
+    """Run one test RUNS times on its own and count the results."""
+    fresh_start()
     passes = 0
     fails = 0
     for _ in range(RUNS):
-        if run_once(test, suspect):
+        if run_once(name, suspect):
             passes += 1
         else:
             fails += 1
@@ -107,19 +133,82 @@ def investigate(test, suspect=None):
     return passes, fails
 
 
-def is_flaky(passes, fails):
-    """Flaky means it did BOTH: passed at least once and failed at least once."""
-    return passes > 0 and fails > 0
-
-
-def find_culprit(test):
+def find_culprit(name):
     """Try freezing each suspect. Return the first one that cures the moodiness."""
     for suspect_name, suspect in SUSPECTS.items():
-        passes, fails = investigate(test, suspect)
+        passes, fails = investigate_alone(name, suspect)
         print(f"    with {suspect_name} frozen: passed {passes:3}  failed {fails:3}")
         if not is_flaky(passes, fails):
             return suspect_name
     return None
+
+
+def phase_one(names):
+    """Investigate every test alone. Return the names of the reliable ones."""
+    print(f"PHASE 1: running each test alone, {RUNS} times\n")
+    reliable = []
+    for name in names:
+        passes, fails = investigate_alone(name)
+
+        if not is_flaky(passes, fails):
+            verdict = "✅ reliable" if fails == 0 else "❌ broken (always fails)"
+            print(f"{name:24}  passed {passes:3}  failed {fails:3}   {verdict}\n")
+            if fails == 0:
+                reliable.append(name)
+            continue
+
+        print(f"{name:24}  passed {passes:3}  failed {fails:3}   🎭 FLAKY, investigating...")
+        culprit = find_culprit(name)
+        if culprit:
+            print(f"    🎯 Culprit: {culprit}\n")
+        else:
+            print("    🤷 No suspect explains it (yet!)\n")
+    return reliable
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: tests together, in shuffled orders
+# ---------------------------------------------------------------------------
+
+def find_mess_maker(victim, others):
+    """Try each other test right before the victim, starting fresh each time.
+    Whoever makes the victim fail is the one leaving the mess."""
+    for other in others:
+        fresh_start()
+        run_once(other)
+        if not run_once(victim):
+            return other
+    return None
+
+
+def phase_two(names, reliable):
+    """Shuffle all tests together and look for reliable tests that start failing."""
+    print(f"PHASE 2: running all tests together in {SHUFFLES} shuffled orders\n")
+
+    failures = {name: 0 for name in reliable}
+    for _ in range(SHUFFLES):
+        order = names[:]           # copy the list...
+        shuffler.shuffle(order)    # ...and mix it up
+        fresh_start()
+        for name in order:
+            if not run_once(name) and name in failures:
+                failures[name] += 1
+
+    found_any = False
+    for victim, count in failures.items():
+        if count == 0:
+            continue
+        found_any = True
+        print(f"{victim:24}  passed alone, but failed in {count}/{SHUFFLES} shuffled orders")
+        others = [name for name in names if name != victim]
+        mess_maker = find_mess_maker(victim, others)
+        if mess_maker:
+            print(f"    🎯 Culprit: 🧍🧍 order. It fails whenever {mess_maker} runs before it\n")
+        else:
+            print("    🤷 Couldn't pin it on a single other test\n")
+
+    if not found_any:
+        print("No order problems found ✅\n")
 
 
 # ---------------------------------------------------------------------------
@@ -127,21 +216,9 @@ def find_culprit(test):
 # ---------------------------------------------------------------------------
 
 def main():
-    print(f"Running each test {RUNS} times...\n")
-    for test in find_tests(moody_tests):
-        passes, fails = investigate(test)
-
-        if not is_flaky(passes, fails):
-            verdict = "✅ reliable" if fails == 0 else "❌ broken (always fails)"
-            print(f"{test.__name__:20}  passed {passes:3}  failed {fails:3}   {verdict}\n")
-            continue
-
-        print(f"{test.__name__:20}  passed {passes:3}  failed {fails:3}   🎭 FLAKY, investigating...")
-        culprit = find_culprit(test)
-        if culprit:
-            print(f"    🎯 Culprit: {culprit}\n")
-        else:
-            print("    🤷 No suspect explains it (yet!)\n")
+    names = find_test_names()
+    reliable = phase_one(names)
+    phase_two(names, reliable)
 
 
 if __name__ == "__main__":

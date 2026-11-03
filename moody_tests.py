@@ -13,6 +13,11 @@ def add(a, b):
     return a + b
 
 
+# A shopping cart that ALL tests share. Sharing things between tests is
+# how one test can leave a mess for another.
+shopping_cart = []
+
+
 def test_good():
     # A well-behaved test. 2 + 2 is always 4, so this always passes.
     assert add(2, 2) == 4
@@ -33,3 +38,16 @@ def test_moody_clock():
     # The test fails during the first 3 tenths of every second.
     fraction_of_second = time.time() % 1
     assert fraction_of_second >= 0.3, f"ran too early in the second ({fraction_of_second:.2f})"
+
+
+def test_add_to_cart():
+    # A MESSY test. It puts an apple in the shared cart and never takes it
+    # out again. It always passes itself, but it leaves a mess behind.
+    shopping_cart.append("apple")
+    assert "apple" in shopping_cart
+
+
+def test_cart_starts_empty():
+    # The VICTIM. It expects the cart to be empty. That's true if it runs
+    # before test_add_to_cart, and false if it runs after.
+    assert len(shopping_cart) == 0, f"cart already has {shopping_cart}"
