@@ -10,14 +10,21 @@
 #   mess. Run the whole set of tests in shuffled orders to catch those, then
 #   test pairs to find out exactly who made the mess.
 #
+# At the end it prints a short "case file" with each culprit and how to fix it.
+#
 # Run it with:   python3 detective.py
+# Or point it at your own tests file:   python3 detective.py my_tests.py
 
 import importlib
 import random
+import sys
 import threading
 import time
 
-import moody_tests
+# Which tests file to investigate. The first word after "detective.py" on the
+# command line (sys.argv[1]) if there is one, otherwise our example file.
+TESTS_FILE = sys.argv[1] if len(sys.argv) > 1 else "moody_tests.py"
+tests = importlib.import_module(TESTS_FILE.removesuffix(".py"))
 
 RUNS = 100        # Phase 1: how many times to run each test on its own
 SHUFFLES = 50     # Phase 2: how many shuffled orders of the whole set to try
@@ -92,6 +99,13 @@ SUSPECTS = {
     "🏃 speed": (freeze_speed, unfreeze_speed),
 }
 
+# What to tell the programmer for each culprit, in the final case file.
+ADVICE = {
+    "🎲 randomness": "set a fixed seed in the test, e.g. random.seed(1)",
+    "⏰ clock": "don't depend on the real time; pass the time in or fake it",
+    "🏃 speed": "wait for helpers properly with .join() instead of sleeping",
+}
+
 
 # ---------------------------------------------------------------------------
 # Running tests
@@ -100,12 +114,12 @@ SUSPECTS = {
 def fresh_start():
     """Reload the tests file from scratch, so everything shared (like the
     shopping cart) is brand new and empty. Like tidying the room."""
-    importlib.reload(moody_tests)
+    importlib.reload(tests)
 
 
 def find_test_names():
     """Find every function in the tests file whose name starts with 'test_'."""
-    return [name for name in dir(moody_tests) if name.startswith("test_")]
+    return [name for name in dir(tests) if name.startswith("test_")]
 
 
 def run_once(name, suspect=None):
@@ -115,14 +129,16 @@ def run_once(name, suspect=None):
     """
     # We look the test up by name every time, because fresh_start() replaces
     # the old test functions with brand-new copies.
-    test = getattr(moody_tests, name)
+    test = getattr(tests, name)
     if suspect is not None:
         freeze, unfreeze = suspect
         freeze()
     try:
         test()
         return True
-    except AssertionError:
+    except Exception:
+        # Any error counts as a fail: a false assert, but also crashes
+        # like dividing by zero. "Exception" catches all of them.
         return False
     finally:
         # "finally" runs no matter what, pass or fail, so the suspect
@@ -164,8 +180,11 @@ def find_culprit(name):
     return None
 
 
-def phase_one(names):
-    """Investigate every test alone. Return the names of the reliable ones."""
+def phase_one(names, findings):
+    """Investigate every test alone. Return the names of the reliable ones.
+
+    Every flaky test gets added to `findings` as (test, culprit, advice).
+    """
     print(f"PHASE 1: running each test alone, {RUNS} times\n")
     reliable = []
     for name in names:
@@ -182,8 +201,10 @@ def phase_one(names):
         culprit = find_culprit(name)
         if culprit:
             print(f"    🎯 Culprit: {culprit}\n")
+            findings.append((name, culprit, ADVICE[culprit]))
         else:
             print("    🤷 No suspect explains it (yet!)\n")
+            findings.append((name, "🤷 unknown", "flaky for a reason the detective doesn't know yet"))
     return reliable
 
 
@@ -202,8 +223,11 @@ def find_mess_maker(victim, others):
     return None
 
 
-def phase_two(names, reliable):
-    """Shuffle all tests together and look for reliable tests that start failing."""
+def phase_two(names, reliable, findings):
+    """Shuffle all tests together and look for reliable tests that start failing.
+
+    Every order problem gets added to `findings` as (test, culprit, advice).
+    """
     print(f"PHASE 2: running all tests together in {SHUFFLES} shuffled orders\n")
 
     failures = {name: 0 for name in reliable}
@@ -225,11 +249,30 @@ def phase_two(names, reliable):
         mess_maker = find_mess_maker(victim, others)
         if mess_maker:
             print(f"    🎯 Culprit: 🧍🧍 order. It fails whenever {mess_maker} runs before it\n")
+            findings.append((victim, "🧍🧍 order", f"{mess_maker} leaves a mess; make it clean up after itself"))
         else:
             print("    🤷 Couldn't pin it on a single other test\n")
+            findings.append((victim, "🧍🧍 order", "some other test leaves a mess behind"))
 
     if not found_any:
         print("No order problems found ✅\n")
+
+
+# ---------------------------------------------------------------------------
+# The final report
+# ---------------------------------------------------------------------------
+
+def print_case_file(names, findings):
+    print("=" * 70)
+    print(f"📋 CASE FILE for {TESTS_FILE}")
+    print("=" * 70)
+    if not findings:
+        print(f"All {len(names)} tests are reliable. No flakiness found ✅")
+        return
+    print(f"{len(findings)} of {len(names)} tests are flaky:\n")
+    for test, culprit, advice in findings:
+        print(f"  {test:24} {culprit}")
+        print(f"  {'':24} → fix: {advice}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +281,15 @@ def phase_two(names, reliable):
 
 def main():
     names = find_test_names()
-    reliable = phase_one(names)
-    phase_two(names, reliable)
+    findings = []
+    reliable = phase_one(names, findings)
+    phase_two(names, reliable, findings)
+    print_case_file(names, findings)
+
+    # Programs end with an "exit code": 0 means "all good", anything else
+    # means "something's wrong". Other tools (like GitHub's automatic checks)
+    # read this number to decide whether to show a green ✓ or a red ✗.
+    sys.exit(1 if findings else 0)
 
 
 if __name__ == "__main__":

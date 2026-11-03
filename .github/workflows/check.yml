@@ -1,0 +1,19 @@
+# GitHub runs this automatically every time code is pushed.
+# It starts a fresh computer in the cloud, downloads the project,
+# and runs the detective on the fixed tests. If the detective finds
+# flakiness, it exits with code 1 and GitHub shows a red ✗.
+
+name: Detective check
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fixed tests should be reliable
+        run: python3 detective.py fixed_tests.py
